@@ -5,6 +5,10 @@ description: Bootstrap a new MoJo real estate app from concept to production. Tr
 
 # MoJo App Platform
 
+## Public Sharing Note
+
+This skill is intentionally safe to share as a public scaffold. It should contain reusable patterns, placeholder env var names, and setup guidance only. Never commit real `.env` files, service-role keys, API keys, OAuth tokens, customer data, lead data, or private operational logs into this skill repo.
+
 ## What This Skill Does
 
 Turns a concept into a production-ready Next.js 15 + TypeScript + Supabase app with the full MoJo plumbing already wired — auth, database, API routes, env vars, and deployment.

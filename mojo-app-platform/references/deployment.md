@@ -6,8 +6,10 @@
 
 ```bash
 cd apps/mojo-[name]
-gh repo create maxtjones-mojo/mojo-[name] --public --push
+gh repo create maxtjones-mojo/mojo-[name] --private --push
 ```
+
+Use `--public` only for intentionally shareable scaffold packages with no real environment files, tokens, client data, lead data, or private logs.
 
 ### 2. Link to Vercel
 
