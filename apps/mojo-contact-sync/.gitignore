@@ -1,0 +1,16 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# Generated sync plans / backups (contain contact PII)
+out/
+
+# Deps & build
+node_modules
+dist
+.next
+
+# OS
+.DS_Store
+Thumbs.db
