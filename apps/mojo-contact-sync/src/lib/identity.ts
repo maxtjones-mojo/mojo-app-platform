@@ -14,7 +14,13 @@ export function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '')
 }
 
-/** A phone number is only a reliable match key once it has enough digits. */
-export function isUsablePhone(normalized: string): boolean {
-  return normalized.length >= 10
+/**
+ * Comparable phone key: the last 10 digits, so the same number compares equal
+ * regardless of formatting or a leading country code (e.g. "+1 816-555-1234"
+ * and "8165551234" both key to "8165551234"). Empty when too short to trust.
+ */
+export function phoneKey(phone: string): string {
+  const digits = normalizePhone(phone)
+  if (digits.length < 10) return ''
+  return digits.slice(-10)
 }

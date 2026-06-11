@@ -8,8 +8,17 @@ export interface GoogleContact {
   phones: string[]
   /** Normalized addresses, used for comparison/dedupe. */
   addresses: StructuredAddress[]
-  /** Original People API address objects, preserved verbatim on write. */
+  /** Original People API objects, preserved verbatim on write. */
   rawAddresses: Record<string, unknown>[]
+  rawEmails: Record<string, unknown>[]
+  rawPhones: Record<string, unknown>[]
+}
+
+/** Missing values to append to a single contact. */
+export interface ContactFieldAdditions {
+  addresses: StructuredAddress[]
+  emails: string[]
+  phones: string[]
 }
 
 interface GoogleClientOptions {
@@ -21,8 +30,8 @@ interface GoogleClientOptions {
 
 const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,addresses,metadata'
 
-// People API address subfields that are writable (everything else, e.g.
-// `metadata`, is output-only and must not be sent back on update).
+// Writable subfields per field type (everything else, e.g. `metadata`, is
+// output-only and must not be sent back on update).
 const WRITABLE_ADDRESS_KEYS = [
   'type',
   'formattedValue',
@@ -35,6 +44,8 @@ const WRITABLE_ADDRESS_KEYS = [
   'country',
   'countryCode',
 ] as const
+const WRITABLE_EMAIL_KEYS = ['value', 'type', 'displayName'] as const
+const WRITABLE_PHONE_KEYS = ['value', 'type'] as const
 
 export class GoogleContactsClient {
   private readonly opts: GoogleClientOptions
@@ -115,28 +126,51 @@ export class GoogleContactsClient {
   }
 
   /**
-   * Append one or more addresses to a contact, preserving every existing
-   * address. The People API replaces the whole `addresses` field, so we resend
-   * the existing addresses (sanitized to writable fields) plus the new ones,
-   * guarded by the contact's `etag`.
+   * Append missing addresses / emails / phones to a contact, preserving every
+   * existing value. The People API replaces each updated field wholesale, so we
+   * resend existing values (sanitized to writable subfields) plus the new ones,
+   * guarded by the contact's `etag`. Only fields with additions are updated.
    */
-  async appendAddresses(
+  async appendFields(
     contact: GoogleContact,
-    additions: StructuredAddress[],
-    label: string,
+    additions: ContactFieldAdditions,
+    addressLabel: string,
   ): Promise<void> {
-    const existing = contact.rawAddresses.map(sanitizeGoogleAddress)
-    const added = additions.map((a) => toGoogleAddressBody(a, label))
-    const next = [...existing, ...added]
+    const body: Record<string, unknown> = { etag: contact.etag }
+    const updateFields: string[] = []
+
+    if (additions.addresses.length > 0) {
+      body.addresses = [
+        ...contact.rawAddresses.map((a) => sanitize(a, WRITABLE_ADDRESS_KEYS)),
+        ...additions.addresses.map((a) => toGoogleAddressBody(a, addressLabel)),
+      ]
+      updateFields.push('addresses')
+    }
+    if (additions.emails.length > 0) {
+      body.emailAddresses = [
+        ...contact.rawEmails.map((e) => sanitize(e, WRITABLE_EMAIL_KEYS)),
+        ...additions.emails.map((value) => ({ value })),
+      ]
+      updateFields.push('emailAddresses')
+    }
+    if (additions.phones.length > 0) {
+      body.phoneNumbers = [
+        ...contact.rawPhones.map((p) => sanitize(p, WRITABLE_PHONE_KEYS)),
+        ...additions.phones.map((value) => ({ value })),
+      ]
+      updateFields.push('phoneNumbers')
+    }
+
+    if (updateFields.length === 0) return
 
     const url = new URL(
       `https://people.googleapis.com/v1/${contact.resourceName}:updateContact`,
     )
-    url.searchParams.set('updatePersonFields', 'addresses')
+    url.searchParams.set('updatePersonFields', updateFields.join(','))
 
     const res = await this.authed(url.toString(), {
       method: 'PATCH',
-      body: JSON.stringify({ etag: contact.etag, addresses: next }),
+      body: JSON.stringify(body),
     })
     if (!res.ok) {
       throw new Error(
@@ -150,13 +184,13 @@ export class GoogleContactsClient {
 function mapGoogleContact(p: Record<string, unknown>): GoogleContact {
   const names = asArray(p.names)
   const name = asString(rec(names[0]).displayName) ?? '(unnamed)'
-  const emails = asArray(p.emailAddresses)
-    .map((e) => asString(rec(e).value))
-    .filter((v): v is string => !!v)
-  const phones = asArray(p.phoneNumbers)
-    .map((e) => asString(rec(e).value))
-    .filter((v): v is string => !!v)
+
+  const rawEmails = asArray(p.emailAddresses).map(rec)
+  const rawPhones = asArray(p.phoneNumbers).map(rec)
   const rawAddresses = asArray(p.addresses).map(rec)
+
+  const emails = rawEmails.map((e) => asString(e.value)).filter((v): v is string => !!v)
+  const phones = rawPhones.map((e) => asString(e.value)).filter((v): v is string => !!v)
   const addresses: StructuredAddress[] = rawAddresses.map((a) => ({
     street: asString(a.streetAddress),
     city: asString(a.city),
@@ -174,13 +208,18 @@ function mapGoogleContact(p: Record<string, unknown>): GoogleContact {
     phones,
     addresses,
     rawAddresses,
+    rawEmails,
+    rawPhones,
   }
 }
 
-function sanitizeGoogleAddress(a: Record<string, unknown>): Record<string, unknown> {
+function sanitize(
+  obj: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const k of WRITABLE_ADDRESS_KEYS) {
-    const v = a[k]
+  for (const k of keys) {
+    const v = obj[k]
     if (v != null && v !== '') out[k] = v
   }
   return out

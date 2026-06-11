@@ -1,27 +1,33 @@
 # mojo-contact-sync
 
-Add **updated addresses from Brivity** to your **Google Contacts** — additively.
+Add **missing data from Brivity** — addresses, emails, and phone numbers — to
+your **Google Contacts**, additively.
 
-When a client's address changes in Brivity (e.g. after they sell and move), this
-tool finds the matching Google contact and **appends** the new address. It never
-edits or removes an existing address, and it's safe to run repeatedly.
+For each Brivity person it finds the matching Google contact and **appends**
+anything Brivity has that the contact is missing. It never edits or removes an
+existing value, and it's safe to run repeatedly.
 
-- **Additive only** — appends a missing address; existing addresses are untouched.
-- **Idempotent** — skips any address already on the contact. Run it quarterly.
+- **Additive only** — appends missing addresses / emails / phones; existing
+  values are untouched.
+- **Idempotent** — skips anything already present (phones compared on the last
+  10 digits, so formatting and country codes don't cause duplicates). Run it a
+  few times a year.
 - **Preview-first** — dry run by default. Nothing is written until `--confirm`.
-- **Isolated** — standalone CLI. Does not touch the MoJo Leads app, its database,
-  or Brivity itself (v1 is one-directional: Brivity → Google).
+- **Isolated** — standalone CLI. Does not touch the MoJo Leads app, its
+  database, or Brivity itself (v1 is one-directional: Brivity → Google).
 
 ## How it works
 
-1. Pulls all your Google contacts and all Brivity people (with addresses).
+1. Pulls all your Google contacts and all Brivity people (addresses, emails,
+   phones).
 2. Matches each Brivity person to a Google contact — **phone first, then email**
    by default (configurable). Ambiguous matches (more than one contact) are
    skipped and listed for manual review, never guessed.
-3. For each match, if the Brivity address isn't already on the contact, it
-   queues an **add**.
+3. For each match, computes what Brivity has that the contact is missing and
+   queues those additions.
 4. Prints a report + writes a plan file. With `--confirm`, it backs up the
-   touched contacts' existing addresses, then appends the new ones.
+   touched contacts' existing fields, then appends the new values (one
+   updateContact call per contact, guarded by the contact's etag).
 
 ## Setup
 
@@ -82,14 +88,19 @@ npm run sync -- --confirm --limit 5
 npm run sync -- --confirm
 ```
 
+By default it adds **all** missing addresses, emails, and phone numbers.
+
 ### Options
 
 | Flag | Description |
 | --- | --- |
 | `--confirm` | Actually write to Google Contacts (default is dry run). |
-| `--limit N` | On apply, only modify the first N contacts. |
-| `--all-addresses` | Add every Brivity address missing from the contact (default: only the current/primary one). |
-| `--label TEXT` | Label for the added address (default `Home`). |
+| `--limit N` | On apply, only modify the first N contacts (cautious batch). |
+| `--primary-address-only` | Only add the current/primary address (default: all missing addresses). |
+| `--no-addresses` | Don't sync addresses. |
+| `--no-emails` | Don't sync email addresses. |
+| `--no-phones` | Don't sync phone numbers. |
+| `--label TEXT` | Label for added addresses (default `Home`). |
 | `--strategy NAME` | `phone_then_email` \| `email_then_phone` \| `phone_only` \| `email_only`. |
 | `--dump-brivity` | Print raw Brivity records and exit. |
 | `-h, --help` | Show help. |
@@ -97,8 +108,8 @@ npm run sync -- --confirm
 ### Output & safety
 
 - `out/plan-<timestamp>.json` — the full plan (every add/skip + reason).
-- `out/backup-<timestamp>.json` — existing addresses of every contact touched,
-  written **before** any change, so edits are reversible.
+- `out/backup-<timestamp>.json` — existing addresses, emails, and phones of every
+  contact touched, written **before** any change, so edits are reversible.
 - `out/` is git-ignored (contains contact PII).
 
 ## Rolling it out to other agents

@@ -9,12 +9,16 @@ import {
 } from './config'
 import { BrivityClient } from './lib/brivity'
 import { GoogleContactsClient, type GoogleContact } from './lib/google'
+import { formatAddress } from './lib/address'
 import { applyPlan, buildBackup, buildPlan, type Plan, type PlanItem } from './sync'
 
 interface CliOptions {
   confirm: boolean
   dumpBrivity: boolean
-  allAddresses: boolean
+  primaryAddressOnly: boolean
+  noAddresses: boolean
+  noEmails: boolean
+  noPhones: boolean
   limit?: number
   label?: string
   strategy?: MatchStrategy
@@ -35,7 +39,10 @@ function parseArgs(argv: string[]): CliOptions {
   return {
     confirm: has('--confirm'),
     dumpBrivity: has('--dump-brivity'),
-    allAddresses: has('--all-addresses'),
+    primaryAddressOnly: has('--primary-address-only'),
+    noAddresses: has('--no-addresses'),
+    noEmails: has('--no-emails'),
+    noPhones: has('--no-phones'),
     limit: Number.isFinite(limit) ? limit : undefined,
     label: valueOf('--label'),
     strategy: strategyRaw && MATCH_STRATEGIES.includes(strategyRaw) ? strategyRaw : undefined,
@@ -44,10 +51,12 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 const HELP = `
-mojo-contact-sync — add updated Brivity addresses to your Google Contacts.
+mojo-contact-sync — add missing Brivity data to your Google Contacts.
 
-Additive only: it never edits or removes an existing address, only appends a
-missing one. Dry run by default — nothing is written until you pass --confirm.
+Adds missing addresses, emails, and phone numbers from Brivity to the matching
+Google contact. Additive only: it never edits or removes an existing value,
+only appends a missing one. Dry run by default — nothing is written until
+you pass --confirm.
 
 USAGE
   npm run sync                 # preview (dry run): show what would change
@@ -55,15 +64,18 @@ USAGE
   npm run dump-brivity         # print a few raw Brivity records to verify fields
 
 OPTIONS
-  --confirm            Actually write to Google Contacts (default is dry run).
-  --limit N            On apply, only modify the first N contacts (cautious batch).
-  --all-addresses      Add every Brivity address missing from the contact
-                       (default: only the current/primary address).
-  --label TEXT         Label for the added address (default: "Home").
-  --strategy NAME      Match strategy: ${MATCH_STRATEGIES.join(' | ')}
-                       (default from MATCH_STRATEGY env, else phone_then_email).
-  --dump-brivity       Print raw Brivity records and exit (no Google access).
-  -h, --help           Show this help.
+  --confirm               Actually write to Google Contacts (default is dry run).
+  --limit N               On apply, only modify the first N contacts.
+  --primary-address-only  Only add the current/primary address (default: all
+                          missing addresses).
+  --no-addresses          Don't sync addresses.
+  --no-emails             Don't sync email addresses.
+  --no-phones             Don't sync phone numbers.
+  --label TEXT            Label for added addresses (default: "Home").
+  --strategy NAME         Match strategy: ${MATCH_STRATEGIES.join(' | ')}
+                          (default from MATCH_STRATEGY env, else phone_then_email).
+  --dump-brivity          Print raw Brivity records and exit (no Google access).
+  -h, --help              Show this help.
 
 Plans and pre-change backups are written to ./out/ (git-ignored — they contain
 contact PII).
@@ -72,24 +84,30 @@ contact PII).
 function fmtSummary(plan: Plan): string {
   const s = plan.summary
   return [
-    `  add (will append):     ${s.add}`,
-    `  already present:       ${s.skip_present}`,
+    `  contacts to update:    ${s.contacts_to_update}`,
+    `    · addresses to add:  ${s.addresses_added}`,
+    `    · emails to add:     ${s.emails_added}`,
+    `    · phones to add:     ${s.phones_added}`,
+    `  already complete:      ${s.skip_present}`,
     `  no Google match:       ${s.skip_no_match}`,
     `  ambiguous (skipped):   ${s.skip_ambiguous}`,
-    `  Brivity has no address:${s.skip_no_address}`,
+    `  no data in Brivity:    ${s.skip_no_data}`,
   ].join('\n')
 }
 
-function printAddTable(items: PlanItem[]): void {
+function printPlanDetail(items: PlanItem[]): void {
   const adds = items.filter((i) => i.action === 'add')
   if (adds.length === 0) {
-    console.log('\nNo addresses to add.')
+    console.log('\nNothing to add.')
     return
   }
-  console.log(`\nAddresses to ADD (${adds.length}):`)
+  console.log(`\nContacts to update (${adds.length}):`)
   for (const i of adds) {
+    const a = i.additions!
     console.log(`  • ${i.contactName}  [matched by ${i.matchedBy}]`)
-    console.log(`      + ${i.addressText}`)
+    for (const addr of a.addresses) console.log(`      + address: ${formatAddress(addr)}`)
+    for (const e of a.emails) console.log(`      + email:   ${e}`)
+    for (const p of a.phones) console.log(`      + phone:   ${p}`)
   }
 }
 
@@ -127,8 +145,7 @@ async function main(): Promise<void> {
   if (opts.dumpBrivity) {
     assertBrivityConfig(config)
     const brivity = new BrivityClient(config.brivity)
-    const raw = await brivity.dumpRawPage()
-    console.log(JSON.stringify(raw, null, 2))
+    console.log(JSON.stringify(await brivity.dumpRawPage(), null, 2))
     return
   }
 
@@ -143,12 +160,19 @@ async function main(): Promise<void> {
   console.log(`  Brivity people:  ${people.length}`)
   console.log(`  Google contacts: ${contacts.length}`)
 
-  const plan = buildPlan(people, contacts, { strategy, label, allAddresses: opts.allAddresses })
+  const plan = buildPlan(people, contacts, {
+    strategy,
+    label,
+    includeAddresses: !opts.noAddresses,
+    includeEmails: !opts.noEmails,
+    includePhones: !opts.noPhones,
+    primaryAddressOnly: opts.primaryAddressOnly,
+  })
 
-  console.log(`\nStrategy: ${strategy}   Label: "${label}"`)
+  console.log(`\nStrategy: ${strategy}   Address label: "${label}"`)
   console.log('Summary:')
   console.log(fmtSummary(plan))
-  printAddTable(plan.items)
+  printPlanDetail(plan.items)
   printAttention(plan.items)
 
   const planPath = writeJson(outDir, `plan-${stamp}.json`, plan)
@@ -159,7 +183,7 @@ async function main(): Promise<void> {
     return
   }
 
-  if (plan.summary.add === 0) {
+  if (plan.summary.contacts_to_update === 0) {
     console.log('\nNothing to apply.')
     return
   }
@@ -168,10 +192,10 @@ async function main(): Promise<void> {
     contacts.map((c) => [c.resourceName, c]),
   )
 
-  // Backup existing addresses of every contact we are about to touch.
+  // Backup existing fields of every contact we are about to touch.
   const backup = buildBackup(plan, contactByResourceName)
   const backupPath = writeJson(outDir, `backup-${stamp}.json`, backup)
-  console.log(`\nBacked up existing addresses of ${backup.length} contact(s) to ${backupPath}`)
+  console.log(`\nBacked up existing fields of ${backup.length} contact(s) to ${backupPath}`)
 
   console.log(`Applying${opts.limit != null ? ` (limit ${opts.limit} contacts)` : ''}…`)
   const result = await applyPlan(plan, google, contactByResourceName, label, opts.limit)
