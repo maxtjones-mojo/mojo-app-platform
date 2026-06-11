@@ -43,8 +43,8 @@ cp .env.example .env   # then fill in the values
 ### Brivity
 
 ```
-BRIVITY_API_KEY=...                              # required
-BRIVITY_API_BASE=https://api.brivity.com/api/v2  # override only if different
+BRIVITY_API_KEY=...                           # required
+BRIVITY_API_BASE=https://api.brivity.com/api  # people API is unversioned (not /api/v2)
 ```
 
 > **Verify the Brivity field mapping first.** The read-people endpoint and field

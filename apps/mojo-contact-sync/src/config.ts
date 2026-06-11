@@ -56,7 +56,9 @@ export function loadConfig(): Config {
   return {
     brivity: {
       apiKey: process.env.BRIVITY_API_KEY ?? '',
-      apiBase: process.env.BRIVITY_API_BASE ?? 'https://api.brivity.com/api/v2',
+      // The people read API lives at /api (unversioned); /api/v2 only has the
+      // lead-create POST and returns a 406 envelope for GET /people.
+      apiBase: process.env.BRIVITY_API_BASE ?? 'https://api.brivity.com/api',
     },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID,
