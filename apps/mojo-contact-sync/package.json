@@ -1,0 +1,22 @@
+{
+  "name": "mojo-contact-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Additively sync updated addresses from Brivity into Google Contacts. Preview-first, idempotent, never overwrites an existing address.",
+  "type": "module",
+  "scripts": {
+    "sync": "tsx src/cli.ts",
+    "preview": "tsx src/cli.ts",
+    "apply": "tsx src/cli.ts --confirm",
+    "dump-brivity": "tsx src/cli.ts --dump-brivity",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
